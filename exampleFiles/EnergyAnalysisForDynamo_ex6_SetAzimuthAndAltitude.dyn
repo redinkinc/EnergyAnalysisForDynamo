@@ -1,0 +1,18 @@
+<Workspace Version="0.7.2.2921" X="0" Y="0" zoom="1" Description="" Category="" Name="Home">
+  <Elements>
+    <Dynamo.Nodes.DSFunction type="Dynamo.Nodes.DSFunction" guid="b0fd1e93-4323-4b6a-b8d1-1307dc2a1597" nickname="SolarSettings.SetAzimuthAltitude" x="409" y="230.5" isVisible="true" isUpstreamVisible="true" lacing="Shortest" assembly="..\src\EnergyAnalysisForDynamo\bin\EnergyAnalysisForDynamo.dll" function="EnergyAnalysisForDynamo.SolarSettings.SetAzimuthAltitude@double,double" />
+    <Dynamo.Nodes.DoubleSlider type="Dynamo.Nodes.DoubleSlider" guid="b40421c4-c66a-40d3-9627-819afc6051d6" nickname="azimuth" x="186" y="178.5" isVisible="true" isUpstreamVisible="true" lacing="Disabled">
+      <System.Double>154.805755395683</System.Double>
+      <Range min="0" max="360" />
+    </Dynamo.Nodes.DoubleSlider>
+    <Dynamo.Nodes.DoubleSlider type="Dynamo.Nodes.DoubleSlider" guid="828450af-350c-4e30-839e-2f24cb312f08" nickname="altitude" x="184" y="281.5" isVisible="true" isUpstreamVisible="true" lacing="Disabled">
+      <System.Double>31.0791366906474</System.Double>
+      <Range min="0" max="90" />
+    </Dynamo.Nodes.DoubleSlider>
+  </Elements>
+  <Connectors>
+    <Dynamo.Models.ConnectorModel start="b40421c4-c66a-40d3-9627-819afc6051d6" start_index="0" end="b0fd1e93-4323-4b6a-b8d1-1307dc2a1597" end_index="0" portType="0" />
+    <Dynamo.Models.ConnectorModel start="828450af-350c-4e30-839e-2f24cb312f08" start_index="0" end="b0fd1e93-4323-4b6a-b8d1-1307dc2a1597" end_index="1" portType="0" />
+  </Connectors>
+  <Notes />
+</Workspace>

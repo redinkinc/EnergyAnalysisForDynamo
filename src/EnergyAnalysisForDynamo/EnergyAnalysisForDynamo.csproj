@@ -121,6 +121,7 @@
     <Compile Include="RunAnalysis.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PrepareEnergyModel.cs" />
+    <Compile Include="SolarSettings.cs" />
     <Compile Include="Utilities\ApiUri.cs" />
     <Compile Include="Utilities\Contract.cs" />
     <Compile Include="Utilities\ElementId.cs" />
