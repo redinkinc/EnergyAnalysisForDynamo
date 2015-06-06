@@ -31,7 +31,6 @@ using RevitServices.Persistence;
 using RevitServices.Transactions;
 using ProtoCore;
 using ProtoCore.Utils;
-using Dynamo.Controls;
 using RevitServices.Elements;
 using Dynamo;
 using DynamoUtilities;
@@ -58,52 +57,106 @@ namespace EnergyAnalysisForDynamo
 
         // NODE: Create Base Run
         /// <summary>
-        /// Creates Base Run and returns Base RunId
+        /// Uploads and runs the energy analysis at the cloud and returns 'RunId' for results. Will return 0 for output 'RunId' if the request times out, currenlty set 5 mins. GBS Project location information overwrites the gbxml file location. If gbXML locations are variant, create new Project for each.
         /// </summary>
         /// <param name="ProjectId"> Input Project ID </param>
-        /// <param name="gbXMLPath"> Input file path of gbXML File </param>
+        /// <param name="gbXMLPaths"> Input file path of gbXML File </param>
         /// <param name="ExecuteParametricRuns"> Set to true to execute parametric runs. You can read more about parametric runs here: http://autodesk.typepad.com/bpa/ </param>
+        /// /// <param name="Timeout"> Set custom connection timeout value. Default is 300000 ms (2 mins) </param>
         /// <returns></returns>
-        [MultiReturn("RunId")]
-        public static Dictionary<string, int> RunEnergyAnalysis(int ProjectId, string gbXMLPath, bool ExecuteParametricRuns = false)
+        [MultiReturn("RunIds","UploadTimes","Report")]
+        public static Dictionary<string, List<object>> RunEnergyAnalysis(int ProjectId, List<string> gbXMLPaths, bool ExecuteParametricRuns = false, int Timeout = 300000)
         {
             // Make sure the given file is an .xml
-            string extention = string.Empty;
-            try
+            foreach (var gbXMLPath in gbXMLPaths)
             {
-                extention = Path.GetExtension(gbXMLPath);
+                // check if it is exist
+                if (!File.Exists(gbXMLPath))
+                {
+                    throw new Exception("The file doesn't exists!");
+                }
+
+                string extention = string.Empty;
+                try
+                {
+                    extention = Path.GetExtension(gbXMLPath);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception(ex + "Use 'File Path' node to set the gbxml file location.");
+                }
+
+                if (extention != ".xml")
+                {
+                    throw new Exception("Make sure to input files are gbxml files");
+                }
+
             }
-            catch (Exception ex)
-            {
-                throw new Exception(ex + "Use 'File Path' node to set the gbxml file location." );
-            }
+           
+		        // 1. Initiate the Revit Auth
+                Helper.InitRevitAuthProvider();
 
-            if (extention != ".xml")
-            {
-                throw new Exception("Make sure to input gbxml file");
-            }
+                // 1.1 Turn off MassRuns
+                try
+                {
+                    Helper._ExecuteMassRuns(ExecuteParametricRuns, ProjectId);
+                }
+                catch (Exception)
+                { 
+                    // Do Nothing!
+                }
 
-            //Output variable
-            int newRunId = 0;
+            //Output variables
+            List<object> newRunIds = new List<object>();
+            List<object> uploadTimes = new List<object>();
+            List<object> Reports = new List<object>();
 
-            // 1. Initiate the Revit Auth
-            Helper.InitRevitAuthProvider();
+            foreach (var gbXMLPath in gbXMLPaths)
+	        {
+                int newRunId = 0;
+                Stopwatch stopwatch = new Stopwatch();
+                stopwatch.Start();
 
-            // 1.1 Turn off MassRuns
-            Helper._ExecuteMassRuns(ExecuteParametricRuns, ProjectId);
+                // 2. Create A Base Run
+                string requestCreateBaseRunUri = GBSUri.GBSAPIUri + string.Format(APIV1Uri.CreateBaseRunUri, "xml");
+                HttpWebResponse response = null;
+                try
+                {
+                    response =
+                        (HttpWebResponse)
+                        Helper._CallPostApi(requestCreateBaseRunUri, typeof(NewRunItem), Helper._GetNewRunItem(ProjectId, gbXMLPath),Timeout);
+                }
+                catch (Exception)
+                {
+                    string filename = Path.GetFileName(gbXMLPath);
+                    newRunIds.Add("Couldot run the analysis for the file: " + filename + " Try run the Analysis for this file again! "); 
+                }
 
-            // 2. Create A Base Run
-            string requestCreateBaseRunUri = GBSUri.GBSAPIUri + string.Format(APIV1Uri.CreateBaseRunUri, "xml");
+                if (response != null)
+                {
+                    newRunId = Helper.DeserializeHttpWebResponse(response); 
+                    newRunIds.Add(newRunId);
+                    Reports.Add("Success!");
+                }
+                else
+                {                  
+                    newRunIds.Add(null);
+                    // get file name
+                    string filename = Path.GetFileName(gbXMLPath);
+                    Reports.Add("Couldn't upload gbxml file name : " + filename + ". Set timeout longer and try to run again! ");
+                    //throw new Exception("Couldot run the analysis for the file: " + filename );
+                }
 
-            var response =
-                (HttpWebResponse)
-                 Helper._CallPostApi(requestCreateBaseRunUri, typeof(NewRunItem), Helper._GetNewRunItem(ProjectId, gbXMLPath));
-            newRunId = Helper.DeserializeHttpWebResponse(response);
+                stopwatch.Stop();
+                uploadTimes.Add(stopwatch.Elapsed.ToString(@"m\:ss"));
+	        }
 
             // 3. Populate the Outputs
-            return new Dictionary<string, int>
+            return new Dictionary<string,List<object>>
             {
-                { "RunId", newRunId},
+                { "RunIds" , newRunIds},
+                { "UploadTimes" , uploadTimes},
+                { "Report" , Reports}
             };
         }
 
@@ -223,16 +276,33 @@ namespace EnergyAnalysisForDynamo
         /// </summary>
         /// <param name="FilePath"> Specify the file path location to save gbXML file </param>
         /// <param name="MassFamilyInstance"> Input Mass Id </param>
+        /// <param name="MassShadingInstances"> Input Mass Ids for shading objects </param>
         /// <param name="Run"> Set Boolean True. Default is false </param>
         /// <returns name="report"> Success? </returns>
         /// <returns name="gbXMLPath"></returns>
         [MultiReturn("report", "gbXMLPath")]
-        public static Dictionary<string, object> ExportMassToGBXML(string FilePath, AbstractFamilyInstance MassFamilyInstance, Boolean Run = false)
+        public static Dictionary<string, object> ExportMassToGBXML(string FilePath, AbstractFamilyInstance MassFamilyInstance, List<AbstractFamilyInstance> MassShadingInstances, Boolean Run = false)
         {
+            // Local variables
             Boolean IsSuccess = false;
+            string FileName = string.Empty;
+            string Folder = string.Empty;
 
-            string FileName = Path.GetFileNameWithoutExtension(FilePath);
-            string Folder = Path.GetDirectoryName(FilePath);
+            // Check if path and directory valid
+            if (System.String.IsNullOrEmpty(FilePath) || FilePath == "No file selected.")
+            {
+                throw new Exception("No File selected !");
+            }
+
+            FileName = Path.GetFileNameWithoutExtension(FilePath);
+            Folder = Path.GetDirectoryName(FilePath);
+
+            // Check if Directory Exists
+            if (!Directory.Exists(Folder))
+            {
+                throw new Exception("Folder doesn't exist. Input valid Directory Path!");
+            }
+        
 
             //make RUN? inputs set to True mandatory
             if (Run == false)
@@ -255,13 +325,41 @@ namespace EnergyAnalysisForDynamo
 
             //get the id of the analytical model associated with that mass
             Autodesk.Revit.DB.ElementId myEnergyModelId = MassEnergyAnalyticalModel.GetMassEnergyAnalyticalModelIdForMassInstance(RvtDoc, MassFamilyInstance.InternalElement.Id);
+            if (myEnergyModelId.IntegerValue == -1)
+            {
+                throw new Exception("Could not get the MassEnergyAnalyticalModel from the mass - make sure the Mass has at least one Mass Floor.");
+            }
             MassEnergyAnalyticalModel mea = (MassEnergyAnalyticalModel)RvtDoc.GetElement(myEnergyModelId);
             ICollection<Autodesk.Revit.DB.ElementId> ZoneIds = mea.GetMassZoneIds();
 
-            MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(ZoneIds.ToList()); // two constructors 
+            
 
-            RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+            // get shading Ids
+            List<Autodesk.Revit.DB.ElementId> ShadingIds = new List<Autodesk.Revit.DB.ElementId>();
+            for (int i = 0; i < MassShadingInstances.Count(); i++)
+            {
 
+            // make sure input mass is valid as a shading
+            if (MassInstanceUtils.GetMassLevelDataIds(RvtDoc, MassShadingInstances[i].InternalElement.Id).Count() > 0)
+            {
+                throw new Exception("Item " + i.ToString() + " in MassShadingInstances has mass floors assigned. Remove the mass floors and try again.");
+            }
+
+            ShadingIds.Add(MassShadingInstances[i].InternalElement.Id);
+            }
+
+            if (ShadingIds.Count != 0)
+            {
+                MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(ZoneIds.ToList(), ShadingIds); // two constructors 
+                RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+
+            }
+            else
+            {
+                MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(ZoneIds.ToList()); // two constructors 
+                RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+            }
+            
 
             // if the file exists return success message if not return failed message
             string path = Path.Combine(Folder, FileName + ".xml");
@@ -325,16 +423,32 @@ namespace EnergyAnalysisForDynamo
         /// </summary>
         /// <param name="FilePath"> Specify the file path location to save gbXML file </param>
         /// <param name="ZoneIds"> Input Zone IDs</param>
+        /// <param name="MassShadingInstances"> Input Mass Ids for shading objects </param>
         /// <param name="Run">Set Boolean True. Default is false </param>
         /// <returns name="report"> Success? </returns>
         /// <returns name="gbXMLPath"></returns>
         [MultiReturn("report", "gbXMLPath")]
-        public static Dictionary<string, object> ExportZonesToGBXML(string FilePath, List<ElementId> ZoneIds, Boolean Run = false)
+        public static Dictionary<string, object> ExportZonesToGBXML(string FilePath, List<ElementId> ZoneIds, List<AbstractFamilyInstance> MassShadingInstances, Boolean Run = false)
         {
+            // Local variables
             Boolean IsSuccess = false;
+            string FileName = string.Empty;
+            string Folder = string.Empty;
 
-            string FileName = Path.GetFileNameWithoutExtension(FilePath);
-            string Folder = Path.GetDirectoryName(FilePath);
+            // Check if path and directory valid
+            if (System.String.IsNullOrEmpty(FilePath) || FilePath == "No file selected.")
+            {
+                throw new Exception("No File selected !");
+            }
+
+            FileName = Path.GetFileNameWithoutExtension(FilePath);
+            Folder = Path.GetDirectoryName(FilePath);
+
+            // Check if Directory Exists
+            if (!Directory.Exists(Folder))
+            {
+                throw new Exception("Folder doesn't exist. Input valid Directory Path!");
+            }
 
             //make RUN? inputs set to True mandatory
             if (Run == false)
@@ -358,12 +472,36 @@ namespace EnergyAnalysisForDynamo
             //convert the ElementId wrapper instances to actual Revit ElementId objects
             List<Autodesk.Revit.DB.ElementId> outZoneIds = ZoneIds.Select(e => new Autodesk.Revit.DB.ElementId(e.InternalId)).ToList();
 
-            // Create gbXML
-            MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(outZoneIds);
 
-            RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+            // get shading Ids
+            List<Autodesk.Revit.DB.ElementId> ShadingIds = new List<Autodesk.Revit.DB.ElementId>();
+            for (int i = 0; i < MassShadingInstances.Count(); i++)
+            {
 
+                // make sure input mass is valid as a shading
+                if (MassInstanceUtils.GetMassLevelDataIds(RvtDoc, MassShadingInstances[i].InternalElement.Id).Count() > 0)
+                {
+                    throw new Exception("Item " + i.ToString() + " in MassShadingInstances has mass floors assigned. Remove the mass floors and try again.");
+                }
 
+                ShadingIds.Add(MassShadingInstances[i].InternalElement.Id);
+            }
+
+            if (ShadingIds.Count != 0)
+            {
+                // Create gbXML with shadings
+                MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(outZoneIds.ToList(), ShadingIds); // two constructors 
+                RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+
+            }
+            else
+            {
+                // Create gbXML
+                MassGBXMLExportOptions gbXmlExportOptions = new MassGBXMLExportOptions(outZoneIds.ToList()); // two constructors 
+                RvtDoc.Export(Folder, FileName, gbXmlExportOptions);
+            }
+
+            
             // if the file exists return success message if not return failed message
             string path = Path.Combine(Folder, FileName + ".xml");
 

@@ -31,7 +31,6 @@ using RevitServices.Persistence;
 using RevitServices.Transactions;
 using ProtoCore;
 using ProtoCore.Utils;
-using Dynamo.Controls;
 using RevitServices.Elements;
 using Dynamo;
 using DynamoUtilities;
@@ -190,12 +189,46 @@ namespace EnergyAnalysisForDynamo
         /// <para> Use .... nodes to parse the Results info of the specific run</para>
         /// <param name="RunID"> Input Run Id </param>
         /// <param name="ParametricRunID"> Input an Id for one of the parametric runs</param>
+        /// <param name="enable"> Enables synchronization with the simulation, default is false. Set true to wait the simulation being completed. Beware, it might take several minutes and blocks the Dynamo solution! </param>
         /// <returns></returns>
         [MultiReturn("Results", "BuildingType", "Location", "FloorArea", "BuildingSummary")]
-        public static Dictionary<string, object> LoadAnalysisResults(int RunID, int ParametricRunID = 0)
+        public static Dictionary<string, object> LoadAnalysisResults(int RunID, int ParametricRunID = 0, bool enable = false)
         {
             // Initiate the Revit Auth
             Helper.InitRevitAuthProvider();
+
+            if (!enable) // don't block the dynamo solution
+            {
+                // Defense for 'bad request', check status of RunId
+                string requestGetRunStatusUri = GBSUri.GBSAPIUri +
+                                                string.Format(APIV1Uri.GetRunStatus, RunID, ParametricRunID, "json");
+                HttpWebResponse response = (HttpWebResponse)Helper._CallGetApi(requestGetRunStatusUri);
+                Stream responseStream = response.GetResponseStream();
+                StreamReader reader = new StreamReader(responseStream);
+                string result = reader.ReadToEnd();
+                RunStatus runStatus = Helper.DataContractJsonDeserialize<RunStatus>(result);
+                int percentStatus = runStatus.StatusPercentDone;
+
+                if (percentStatus < 100)
+                {
+                    throw new Exception(System.String.Format("Run Status: {0}% - {1}", percentStatus, runStatus.DetailedStatus));
+                } 
+            }
+            else // true, blocks the dynamo solution until simulation being completed
+            {
+                int percentStatus = 0;
+                while (percentStatus < 100)
+                {
+                    string requestGetRunStatusUri = GBSUri.GBSAPIUri +
+                                string.Format(APIV1Uri.GetRunStatus, RunID, ParametricRunID, "json");
+                    HttpWebResponse response = (HttpWebResponse)Helper._CallGetApi(requestGetRunStatusUri);
+                    Stream responseStream = response.GetResponseStream();
+                    StreamReader reader = new StreamReader(responseStream);
+                    string result = reader.ReadToEnd();
+                    RunStatus runStatus = Helper.DataContractJsonDeserialize<RunStatus>(result);
+                    percentStatus = runStatus.StatusPercentDone;
+                }
+            }
 
             //Get results Summary of given RunID & AltRunID
             string requestGetRunSummaryResultsUri = GBSUri.GBSAPIUri +
@@ -513,15 +546,50 @@ namespace EnergyAnalysisForDynamo
 
         // NODE: Get Run Result TO DO: work with GBS Team about API calls
         /// <summary>
-        /// Download gbXML, inp or idf files from Green Building Studio
+        /// Downloads gbXML, inp or idf files from Green Building Studio
         /// </summary>
         /// <param name="RunId"> Input Run ID</param>
         /// <param name="ParametricRunId"> Input ID for one of the parametric runs. Default is set to 0</param>
-        /// <param name="FileType"> Result type gbxml or doe2 or inp </param>
-        /// <param name="FilePath"> Set File location to download the file </param>
+        /// <param name="FileType"> Result type gbXMLor doe2 or eplus </param>
+        /// <param name="DirectoryPath"> Set File location to download the file </param>
         /// <returns name="report"> string. </returns>
-        public static string GetEnergyModelFiles(int RunId, string FileType, string FilePath, int ParametricRunId = 0) // result type gbxml/doe2/eplus
+        public static string GetEnergyModelFiles(int RunId, string FileType, string DirectoryPath, int ParametricRunId = 0) // result type gbxml/doe2/eplus
         {
+            // handle with the bad string for energy file types
+            if (FileType.ToLower() == "gbxml" || FileType.ToLower() == "xml")
+            {
+                FileType = "gbXML";
+            }
+            else if (FileType.ToLower() == "doe2" || FileType.Contains("doe") || FileType.ToLower() == "inp")
+            {
+                FileType = "doe2";
+            }
+            else if (FileType.ToLower() == "eplus" || FileType.ToLower() == "energyplus" || FileType.ToLower() == "idf")
+            {
+                FileType = "eplus";
+            }
+            else
+            {
+                throw new Exception("Energy data file type is not valid! Use 'Energy Data File Types' dropdown node to select valid the file type!");
+            }
+
+            // Check if path is file or directoy  & Handle unvalid directory path
+            // get the file attributes for file or directory
+            FileAttributes attr = File.GetAttributes(DirectoryPath);
+
+            //detect whether its a directory or file
+            if ((attr & FileAttributes.Directory) == FileAttributes.Directory) // it is directory
+            { }
+            else
+            {
+                throw new Exception("Please input Directory Path!");
+            }
+
+            if (!Directory.Exists(DirectoryPath))
+            {
+                throw new Exception("Input valid Directory Path!");
+            }
+             
             // Initiate the Revit Auth
             Helper.InitRevitAuthProvider();
 
@@ -530,65 +598,26 @@ namespace EnergyAnalysisForDynamo
 
             // Get result of given RunId
             string requestGetRunResultsUri = GBSUri.GBSAPIUri +
-                                    string.Format(APIV1Uri.GetRunResultsUri, RunId, ParametricRunId, FileType);
+                                    string.Format(APIV1Uri.GetSimulationRunFile, RunId, ParametricRunId, FileType);
 
-            using (HttpWebResponse response = (HttpWebResponse)Helper._CallGetApi(requestGetRunResultsUri))
-            using (Stream stream = response.GetResponseStream())
-            {
-                string zipFileName = Path.Combine(FilePath, string.Format("RunResults_{0}_{1}_{2}.zip", RunId, ParametricRunId, FileType)); //result type gbxml/doe2/eplus
+            HttpWebResponse response = (HttpWebResponse)Helper._CallGetApi(requestGetRunResultsUri);
 
-                using (var fs = File.Create(zipFileName))
-                {
-                    stream.CopyTo(fs);
-                }
+            Stream stream = response.GetResponseStream();
+            StreamReader reader = new StreamReader(stream);
+            string result = reader.ReadToEnd();
 
-                if (File.Exists(zipFileName))
-                { report = "The Analysis result file " + FileType + " was successfully downloaded!"; }
+            SimulationRunFile srf = Helper.DataContractJsonDeserialize<SimulationRunFile>(result);
 
-            }
+            // Get directory and create zip file location
+            //string folder= Path.GetDirectoryName(DirectoryPath);
+            string zipFileName = Path.Combine(DirectoryPath, srf.FileName);
+
+            System.IO.File.WriteAllBytes(zipFileName, srf.FileStream);
+
+            if (File.Exists(zipFileName))
+            { report = "The Analysis result file " + FileType + " was successfully downloaded!"; }
 
             return report;
         }
-
-
-
-        // TO DO: refer to GetEnergyDataFiles Method
-        //[MultiReturn("INPFile", "IDFFile")]
-        //public static Dictionary<string, object> GetEnergyModelFiles(int ProjectId, string ProjectTitle, bool Connect = false)
-        //{
-        //    //local variables
-        //    string INPFile = string.Empty;
-        //    string IDFFile = string.Empty;
-
-        //    //make Connect? inputs set to True mandatory
-        //    if (Connect == false)
-        //    {
-        //        throw new Exception("Set 'Connect' to True!");
-        //    }
-
-        //    // defense
-
-
-        //    // Initiate the Revit Auth
-        //    InitRevitAuthProvider();
-
-        //    /*
-        //    // Request - I'm still not sure how to create the request - should know more after today meeting
-        //    string requestUri = GBSUri.GBSAPIUri + string.Format(APIV1Uri.GetProjectList, "json");
-
-        //    HttpWebResponse response = (HttpWebResponse)_CallGetApi(requestUri);
-        //    Stream responseStream = response.GetResponseStream();
-        //    StreamReader reader = new StreamReader(responseStream);
-        //    string result = reader.ReadToEnd();
-        //    */
-
-        //    return new Dictionary<string, object>
-        //    {
-        //        { "INPFile", INPFile},
-        //        { "IDFFile", IDFFile}
-        //    };
-
-        //}
-
     }
 }

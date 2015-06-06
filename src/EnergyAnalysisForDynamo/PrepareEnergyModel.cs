@@ -29,6 +29,7 @@ namespace EnergyAnalysisForDynamo
     /// </summary>
     public static class PrepareEnergyModel
     {
+        
         /// <summary>
         /// Draws a point around the center of an analysis surface.  Useful for sorting/grouping surfaces upstream of a SetSurfaceParameters node.
         /// </summary>
@@ -81,6 +82,7 @@ namespace EnergyAnalysisForDynamo
             Autodesk.DesignScript.Geometry.Point outPoint = getAveragePointFromFace(smallFace);
             return outPoint;
         }
+        
 
         /// <summary>
         /// Returns a vector represnting the normal of an analysis surface.  Useful for sorting/grouping surfaces upstream of a SetSurfaceParameters node.
@@ -145,8 +147,8 @@ namespace EnergyAnalysisForDynamo
         /// <param name="MassFamilyInstance">The conceptual mass family instance to create zones from</param>
         /// <param name="Levels">A list of levels to create mass floors with</param>
         /// <returns></returns>
-        [MultiReturn("MassFamilyInstance", "ZoneIds", "WallSurfaceIds", "RoofSurfaceIds")]
-        public static Dictionary<string, object> CreateEnergyModelFromMassAndLevels(AbstractFamilyInstance MassFamilyInstance, List<Revit.Elements.Element> Levels)
+        [MultiReturn("MassFamilyInstance", "ZoneIds")]
+        public static Dictionary<string, object> CreateByMassLevels(AbstractFamilyInstance MassFamilyInstance, List<Revit.Elements.Element> Levels)
         {
             //local varaibles
             Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
@@ -214,18 +216,13 @@ namespace EnergyAnalysisForDynamo
             List<Autodesk.Revit.DB.ElementId> zoneIds = mea.GetMassZoneIds().ToList();
             //loop over the output lists, and wrap them in our ElementId wrapper class
             List<ElementId> outZoneIds = zoneIds.Select(e => new ElementId(e.IntegerValue)).ToList();
-
-            List<ElementId> outWallSurfaceIds = Helper.GetSurfaceIdsFromMassEnergyAnalyticalModelBasedOnType(mea, "Mass Exterior Wall");
-            List<ElementId> outRoofSurfaceIds = Helper.GetSurfaceIdsFromMassEnergyAnalyticalModelBasedOnType(mea, "Mass Roof");
-            
+           
             #endregion
 
             return new Dictionary<string, object>
             {
                 {"MassFamilyInstance", MassFamilyInstance},
-                {"ZoneIds", outZoneIds},
-                {"WallSurfaceIds", outWallSurfaceIds},
-                {"RoofSurfaceIds", outRoofSurfaceIds}
+                {"ZoneIds", outZoneIds}
             };
         }
 
@@ -234,8 +231,8 @@ namespace EnergyAnalysisForDynamo
         /// </summary>
         /// <param name="MassFamilyInstance">The conceptual mass family instance to create zones from</param>
         /// <returns></returns>
-        [MultiReturn("MassFamilyInstance", "ZoneIds", "WallSurfaceIds", "RoofSurfaceIds")]
-        public static Dictionary<string, object> CreateEnergyModelFromMass(AbstractFamilyInstance MassFamilyInstance)
+        [MultiReturn("MassFamilyInstance", "ZoneIds")]
+        public static Dictionary<string, object> CreateByMass(AbstractFamilyInstance MassFamilyInstance)
         {
             //local varaibles
             Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
@@ -268,16 +265,10 @@ namespace EnergyAnalysisForDynamo
             //loop over the output lists, and wrap them in our ElementId wrapper class
             List<ElementId> outZoneIds = zoneIds.Select(e => new ElementId(e.IntegerValue)).ToList();
 
-            List<ElementId> outWallSurfaceIds = Helper.GetSurfaceIdsFromMassEnergyAnalyticalModelBasedOnType(mea, "Mass Exterior Wall");
-            List<ElementId> outRoofSurfaceIds = Helper.GetSurfaceIdsFromMassEnergyAnalyticalModelBasedOnType(mea, "Mass Roof");
-
-
             return new Dictionary<string, object>
             {
                 {"MassFamilyInstance", MassFamilyInstance},
-                {"ZoneIds", outZoneIds},
-                {"WallSurfaceIds", outWallSurfaceIds},
-                {"RoofSurfaceIds", outRoofSurfaceIds}
+                {"ZoneIds", outZoneIds}
             };
         }
 
@@ -286,13 +277,12 @@ namespace EnergyAnalysisForDynamo
         /// </summary>
         /// <param name="ZoneId">The ElementId of the zone to inspect.  Get this from the PrepareEnergyModel > CreateFrom* > ZoneIds output list</param>
         /// <returns></returns>
-        [MultiReturn("WallSurfaceIds", "RoofSurfaceIds", "SpaceType", "conditionType")]
+        [MultiReturn("WallSurfaceIds", "IntWallSurfaceIds", "GlazingSurfaceIds", "FloorSurfaceIds", "RoofSurfaceIds", "SkylightSurfaceIds", "SpaceType", "conditionType")]
         public static Dictionary<string, object> DecomposeZone(ElementId ZoneId)
         {
             // local variables
             Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
             MassZone zone = null;
-            Autodesk.Revit.DB.ElementId myEnergyModelId = null;
             gbXMLConditionType conditionType = gbXMLConditionType.NoConditionType;
             gbXMLSpaceType spaceType = gbXMLSpaceType.NoSpaceType;
 
@@ -308,9 +298,15 @@ namespace EnergyAnalysisForDynamo
                 throw new Exception("Couldn't find a zone object with Id #: " + ZoneId.ToString());
             }
 
-            //get external faces belonging to this zone
+            //get ids based on type. Maybe we should write a new function that loops once and returns them all at once
             List<EnergyAnalysisForDynamo.ElementId> outWallSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Exterior Wall");
+            List<EnergyAnalysisForDynamo.ElementId> outIntWallSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Interior Wall");
+            List<EnergyAnalysisForDynamo.ElementId> outGlazingSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Glazing");
+            List<EnergyAnalysisForDynamo.ElementId> outFloorSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Floor");
             List<EnergyAnalysisForDynamo.ElementId> outRoofSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Roof");
+            List<EnergyAnalysisForDynamo.ElementId> outSkylightSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Skylight");
+            // Revit consider both floor and ceiling and floor so this one is out!
+            // List<EnergyAnalysisForDynamo.ElementId> outCeilingSurfaceIds = Helper.GetSurfaceIdsFromZoneBasedOnType(zone, "Mass Interior Ceiling");
  
             // assign condition type
             conditionType = zone.ConditionType;
@@ -322,7 +318,11 @@ namespace EnergyAnalysisForDynamo
             return new Dictionary<string, object>
             {
                 {"WallSurfaceIds", outWallSurfaceIds},
+                {"IntWallSurfaceIds", outIntWallSurfaceIds},
+                {"GlazingSurfaceIds", outGlazingSurfaceIds},
+                {"FloorSurfaceIds", outFloorSurfaceIds},
                 {"RoofSurfaceIds", outRoofSurfaceIds},
+                {"SkylightSurfaceIds", outSkylightSurfaceIds},
                 {"SpaceType", spaceType},
                 {"conditionType", conditionType}
             };
@@ -370,7 +370,7 @@ namespace EnergyAnalysisForDynamo
             Autodesk.Revit.DB.Mesh prettyMesh = smallFace.Triangulate();
             return Revit.GeometryConversion.RevitToProtoMesh.ToProtoType(prettyMesh);
         }
-
+        
         /// <summary>
         /// Draws an analysis zone in Dynamo.  Use this to identify which zone is which in the CreateFromMass/CreateFromMassAndLevels 'ZoneIds' output list.
         /// </summary>
@@ -420,6 +420,250 @@ namespace EnergyAnalysisForDynamo
                 outMeshes.Add(Revit.GeometryConversion.RevitToProtoMesh.ToProtoType(face.Triangulate()));
             }
             return outMeshes;
+        }
+
+
+        /// <summary>
+        /// Separate analysis surfaces by orientation
+        /// </summary>
+        /// <param name="SurfaceIds">The ElementId of the zones.  Get this from the AnalysisZones > CreateFrom* > ZoneIds output list</param>
+        /// <returns></returns>
+        [MultiReturn("AngleToYAxis", "SurfaceIds")]
+
+        public static Dictionary<string, object> SeparateSrfsByOrientation(List<ElementId> SurfaceIds)
+        {
+
+            //local varaibles
+            Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
+            MassSurfaceData surface = null;
+            Autodesk.DesignScript.Geometry.Vector YAxisVector = Autodesk.DesignScript.Geometry.Vector.YAxis();
+            double angle2YAxis = 0;
+
+            // Revit project angle vs real north angle is pretty confusing so I just leave it to YAxis
+            // and users can adjust them based on their project
+            // double projectNorth = RvtDoc.ActiveProjectLocation.get_ProjectPosition(XYZ.Zero).Angle;
+
+            List<Autodesk.Revit.DB.ElementId> levelIds = new List<Autodesk.Revit.DB.ElementId>();
+            
+            SortedDictionary<double, List<ElementId>> SepatatedSurfaces = new SortedDictionary<double, List<ElementId>>();
+
+            for (int i = 0; i < SurfaceIds.Count(); i++)
+            {
+                //try to get MassZone using the ID
+                try
+                {
+                    surface = (MassSurfaceData)RvtDoc.GetElement(new Autodesk.Revit.DB.ElementId(SurfaceIds[i].InternalId));
+                    if (surface == null) throw new Exception();
+                    
+                    // get vector for this surface
+                    Autodesk.DesignScript.Geometry.Vector srfVector = AnalysisSurfaceVector(SurfaceIds[i]);
+
+                    // project vector to XY plane
+                    Autodesk.DesignScript.Geometry.Vector projectedVector = Autodesk.DesignScript.Geometry.Vector.ByCoordinates(srfVector.X, srfVector.Y, 0);
+
+                    // find angle to YAxis
+                    //angle2YAxis = Math.Round(projectedVector.AngleBetween(YAxisVector), 3);
+
+                    //AngleBetween is buggy and I already reported it but it is not fixed
+                    //I haven't tested this intensively but worked for couple of cases that I tried
+                    angle2YAxis = Math.Round(CalculateAngleXY(projectedVector, YAxisVector), 3);
+                                                            
+                    if (! SepatatedSurfaces.ContainsKey(angle2YAxis))
+                    {
+                        // create an empty list as place holder
+                        SepatatedSurfaces[angle2YAxis] = new List<ElementId>();
+                    }
+
+                    // add surfaceId
+                    SepatatedSurfaces[angle2YAxis].Add(SurfaceIds[i]);
+
+                }
+                catch (Exception)
+                {
+                    throw new Exception("Couldn't find a surface object with Id #: " + SurfaceIds[i].ToString());
+                }
+
+
+            }
+
+            //return the levels and zone IDs
+            return new Dictionary<string, object>
+            {
+                {"AngleToYAxis", SepatatedSurfaces.Keys},
+                {"SurfaceIds", SepatatedSurfaces.Values}
+            };
+        }
+        
+
+        /// <summary>
+        /// Separate analysis zones by level
+        /// </summary>
+        /// <param name="ZoneIds">The ElementId of the zones.  Get this from the AnalysisZones > CreateFrom* > ZoneIds output list</param>
+        /// <returns></returns>
+        [MultiReturn("Levels", "ZoneIds")]
+
+        public static Dictionary<string, object> SeparateZonesByLevel(List<ElementId> ZoneIds)
+        {
+            
+            //local varaibles
+            Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
+            MassZone zone = null;
+            Autodesk.Revit.DB.Level level = null;
+
+            List<Autodesk.Revit.DB.ElementId> levelIds = new List<Autodesk.Revit.DB.ElementId>();
+            SortedDictionary<double, Autodesk.Revit.DB.Level> levels = new SortedDictionary<double, Autodesk.Revit.DB.Level>();
+            //SortedDictionary<double, Autodesk.Revit.DB.ElementId> levels = new SortedDictionary<double, Autodesk.Revit.DB.ElementId>();
+            SortedDictionary<double, List<ElementId>> SepatatedZones = new SortedDictionary<double, List<ElementId>>();
+            
+            for (int i = 0; i < ZoneIds.Count(); i++ )
+            { 
+                //try to get MassZone using the ID
+                try
+                {
+                    zone = (MassZone)RvtDoc.GetElement(new Autodesk.Revit.DB.ElementId(ZoneIds[i].InternalId));
+                    
+                    if (zone == null) throw new Exception();
+                    
+                    //find level ID
+                    Autodesk.Revit.DB.ElementId levelId = zone.LowerLevelId;
+                    
+                    // get level element
+                    level = (Autodesk.Revit.DB.Level)RvtDoc.GetElement(levelId);
+
+                    // get the elevation for the level
+                    double elevation = level.Elevation;
+
+                    // add levels and zones to dictionary based on elevation
+                    levels[elevation] = level;
+
+                    if (!SepatatedZones.ContainsKey(elevation))
+                    {
+                        // create an empty list as place holder
+                        SepatatedZones[elevation] = new List<ElementId>();
+                    }
+                    
+                    // add zoneId
+                    SepatatedZones[elevation].Add(ZoneIds[i]);
+
+                }
+                catch (Exception)
+                {
+                    throw new Exception("Couldn't find a zone object with Id #: " + ZoneIds[i].ToString());
+                }
+
+
+            }
+            
+            //return the levels and zone IDs
+            return new Dictionary<string, object>
+            {
+                {"Levels", levels.Values},
+                {"ZoneIds", SepatatedZones.Values}
+            };
+        }
+        
+        
+        
+        /// <summary>
+        /// Sets surface's construction type. This node works for all the surface types.
+        /// </summary>
+        /// <param name="SurfaceId">The ElementId of the surface to modify.  Get this from the AnalysisZones > CreateFrom* > SurfaceIds output list</param>
+        /// <param name="ConstType">Conceptual Construction Type. Use the Conceptual Construction Types Dropdown node from our EnergySettings tab to specify a value.</param>
+        /// <returns></returns>
+        public static ElementId SetSurfaceConceptualConstruction(ElementId SurfaceId, string ConstType)
+        {
+            //local varaibles
+            Document RvtDoc = DocumentManager.Instance.CurrentUIApplication.ActiveUIDocument.Document;
+            MassSurfaceData surf = null;
+
+            //try to get the MassSurfaceData object from the document
+            try
+            {
+                surf = (MassSurfaceData)RvtDoc.GetElement(new Autodesk.Revit.DB.ElementId(SurfaceId.InternalId));
+                if (surf == null) throw new Exception();
+            }
+            catch (Exception)
+            {
+                throw new Exception("Couldn't find a MassSurfaceData object with Id #: " + SurfaceId.ToString());
+            }
+            
+            try
+            {
+                //start a transaction task
+                TransactionManager.Instance.EnsureInTransaction(RvtDoc);
+
+                //change the 'Values' param to 1 - by surface
+                var val = surf.get_Parameter("Values");
+                if (val != null)
+                {
+                    val.Set(1);
+                }
+                
+                //set conceptual construction if not empty
+                if (!string.IsNullOrEmpty(ConstType))
+                {
+                    // check if the construction matches the surface type
+                    switch (surf.Category.Name)
+                    {
+                        case "Mass Exterior Wall":
+                            if (Enum.IsDefined(typeof(ConceptualConstructionWallType), ConstType)!=true)
+                            {
+                                throw new Exception(ConstType + " is not a valid construction type for walls.");
+                            }
+                            break;
+
+                        case "Mass Interior Wall":
+                            if (Enum.IsDefined(typeof(ConceptualConstructionWallType), ConstType) != true)
+                            {
+                                throw new Exception(ConstType + " is not a valid construction type for walls.");
+                            }
+                            break;
+
+                        case "Mass Glazing":
+                            if (Enum.IsDefined(typeof(ConceptualConstructionWindowSkylightType), ConstType) != true)
+                            {
+                                throw new Exception(ConstType + " is not a valid construction type for glazing.");
+                            }
+                            break;
+                        
+                        case "Mass Floor":
+                            if (Enum.IsDefined(typeof(ConceptualConstructionFloorSlabType), ConstType) != true)
+                            {
+                                throw new Exception(ConstType + " is not a valid construction type for floors.");
+                            }
+                            break;
+                        
+                        case "Mass Roof":
+                            if (Enum.IsDefined(typeof(ConceptualConstructionRoofType), ConstType) != true)
+                            {
+                                throw new Exception(ConstType + " is not a valid construction type for roofs.");
+                            }
+                            break;
+                    }
+
+                    // it is all fine so let's change the construction type
+                    Autodesk.Revit.DB.ElementId myTypeId = getConceptualConstructionIdFromName(RvtDoc, ConstType, surf.Category.Name);
+
+                    if (myTypeId != null)
+                    {
+                        surf.IsConceptualConstructionByEnergyData = false;
+                        surf.ConceptualConstructionId = myTypeId;
+                    }
+                    
+                }
+
+                //done with transaction task
+                TransactionManager.Instance.TransactionTaskDone();
+
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("# " + SurfaceId.ToString() + ": " + ex.Message);
+            }
+
+            //return the surface ID so the surface can be used downstream
+            return SurfaceId;       
+
         }
 
         /// <summary>
@@ -483,11 +727,20 @@ namespace EnergyAnalysisForDynamo
                 //set conceptual construction if not empty
                 if (!string.IsNullOrEmpty(ConstType) && ConstType != "default")
                 {
-                    Autodesk.Revit.DB.ElementId myTypeId = getConceptualConstructionIdFromName(RvtDoc, ConstType);
-                    if (myTypeId != null)
+                    // check if construction is a valid Revit construction for roofs
+                    if (Enum.IsDefined(typeof(ConceptualConstructionRoofType), ConstType))
                     {
-                        surf.IsConceptualConstructionByEnergyData = false;
-                        surf.ConceptualConstructionId = myTypeId;
+                        Autodesk.Revit.DB.ElementId myTypeId = getConceptualConstructionIdFromName(RvtDoc, ConstType, surf.Category.Name);
+
+                        if (myTypeId != null)
+                        {
+                            surf.IsConceptualConstructionByEnergyData = false;
+                            surf.ConceptualConstructionId = myTypeId;
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception(ConstType + " is not a valid construction type for roofs.");
                     }
                 }
 
@@ -495,12 +748,12 @@ namespace EnergyAnalysisForDynamo
                 TransactionManager.Instance.TransactionTaskDone();
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new Exception("Something went wrong when trying to set the parameters on surface # " + SurfaceId.ToString());
+                throw new Exception("Failed to set the parameters on surface # " + SurfaceId.ToString() + ":\n" + ex.Message);
             }
 
-            //return the surface ID so the surface can be used downstream            
+            //return the surface ID so the surface can be used downstream
             return SurfaceId;
         }
 
@@ -557,7 +810,8 @@ namespace EnergyAnalysisForDynamo
                 }
 
                 //set target sill height 
-                surf.SillHeight = sillHeight * UnitConverter.DynamoToHostFactor;
+                //surf.SillHeight = sillHeight * UnitConverter.DynamoToHostFactor;
+                surf.SillHeight = sillHeight;
 
                 //set glazing percentage
                 surf.PercentageGlazing = glazingPercent;
@@ -566,7 +820,8 @@ namespace EnergyAnalysisForDynamo
                 if (shadingDepth > 0)
                 {
                     surf.IsGlazingShaded = true;
-                    surf.ShadeDepth = shadingDepth * UnitConverter.DynamoToHostFactor;
+                    //surf.ShadeDepth = shadingDepth * UnitConverter.DynamoToHostFactor;
+                    surf.ShadeDepth = shadingDepth;
                 }
                 else 
                 {
@@ -578,11 +833,20 @@ namespace EnergyAnalysisForDynamo
                 //set conceptual construction if not empty
                 if (!string.IsNullOrEmpty(ConstType) && ConstType != "default")
                 {
-                    Autodesk.Revit.DB.ElementId myTypeId = getConceptualConstructionIdFromName(RvtDoc, ConstType);
-                    if (myTypeId != null)
+                    // check if construction is a valid Revit construction for walls
+                    if (Enum.IsDefined(typeof(ConceptualConstructionWallType), ConstType))
                     {
-                        surf.IsConceptualConstructionByEnergyData = false;
-                        surf.ConceptualConstructionId = myTypeId;
+                        Autodesk.Revit.DB.ElementId myTypeId = getConceptualConstructionIdFromName(RvtDoc, ConstType, surf.Category.Name);
+
+                        if (myTypeId != null)
+                        {
+                            surf.IsConceptualConstructionByEnergyData = false;
+                            surf.ConceptualConstructionId = myTypeId;
+                        }
+                    }
+                    else
+                    {
+                        throw new Exception(ConstType + " is not a valid construction type for walls.");
                     }
                 }
 
@@ -590,9 +854,9 @@ namespace EnergyAnalysisForDynamo
                 TransactionManager.Instance.TransactionTaskDone();
 
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                throw new Exception("Something went wrong when trying to set the parameters on surface # " + SurfaceId.ToString());
+                throw new Exception("Failed to set the parameters on surface # " + SurfaceId.ToString() + ":\n" + ex.Message);
             }
 
             //return the surface ID so the surface can be used downstream
@@ -790,7 +1054,7 @@ namespace EnergyAnalysisForDynamo
                 }
             return false;
         }
-
+        
         private static Autodesk.DesignScript.Geometry.Point getAveragePointFromFace(Autodesk.Revit.DB.Face f)
         {
             //the point to return 
@@ -828,7 +1092,6 @@ namespace EnergyAnalysisForDynamo
                     Autodesk.DesignScript.Geometry.Mesh m = Revit.GeometryConversion.RevitToProtoMesh.ToProtoType(pf.Triangulate());
                     var points = m.VertexPositions;
 
-
                     int numVertices = points.Count();
                     double x = 0, y = 0, z = 0;
                     foreach (var v in points)
@@ -845,6 +1108,7 @@ namespace EnergyAnalysisForDynamo
             }
             return p;
         }
+        
 
         private static Autodesk.Revit.DB.Face GetSmallestFace(Document RvtDoc, MassSurfaceData surf, Autodesk.Revit.DB.ElementId myEnergyModelId)
         {
@@ -884,13 +1148,36 @@ namespace EnergyAnalysisForDynamo
             return bigFace;
         }
 
-        private static Autodesk.Revit.DB.ElementId getConceptualConstructionIdFromName(Document RvtDoc, string name)
+        private static Autodesk.Revit.DB.ElementId getConceptualConstructionIdFromName(Document RvtDoc, string name, string categoryName = "Mass Exterior Wall")
         {
             try
             {
                 //query the revit doc for all elements of type ConceptualConstructionWallType
                 FilteredElementCollector col = new FilteredElementCollector(RvtDoc);
-                col.OfCategory(BuiltInCategory.OST_MassWallsAll);
+
+                switch (categoryName)
+                {
+                    case "Mass Exterior Wall":
+                        col.OfCategory(BuiltInCategory.OST_MassWallsAll);
+                        break;
+
+                    case "Mass Interior Wall":
+                        col.OfCategory(BuiltInCategory.OST_MassWallsAll);
+                        break;
+
+                    case "Mass Glazing":
+                        col.OfCategory(BuiltInCategory.OST_MassGlazingAll);
+                        break;
+
+                    case "Mass Floor":
+                        col.OfCategory(BuiltInCategory.OST_MassFloorsAll);
+                        break;
+
+                    case "Mass Roof":
+                        col.OfCategory(BuiltInCategory.OST_MassRoof);
+                        break;
+                }
+                
                 var ids = col.ToElements();
                 var i = ids.GetEnumerator();
 
@@ -918,6 +1205,17 @@ namespace EnergyAnalysisForDynamo
                 }
             }
             catch (Exception) { return null; } 
+        }
+
+        private static double CalculateAngleXY(Vector u, Vector v)
+        {
+            double ux = u.X;
+            double uy = u.Y;
+            double vx = v.X;
+            double vy = v.Y;
+            double angleInRad = Math.Atan2(-uy * vx + ux * vy, ux * vx + uy * vy);
+            
+            return angleInRad *180 / Math.PI ;
         }
 
         /// <summary>

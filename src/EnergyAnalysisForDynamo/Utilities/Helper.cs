@@ -42,6 +42,9 @@ namespace EnergyAnalysisForDynamo.Utilities
 
             //get references to the faces using the mass - we need these to get at the surface data
             IList<Reference> faceRefs = MassEnergyAnalyticalModel.GetReferencesToAllFaces();
+            
+            //list to collect ids of matching surfaces
+            List<Autodesk.Revit.DB.ElementId> SelectedSurfaceIds = new List<Autodesk.Revit.DB.ElementId>();
 
             //some faces supposedly share massSurfaceData definitions (although i think they are all unique in practice) - here we're pulling out unique data definitions.  
             Dictionary<int, MassSurfaceData> mySurfaceData = new Dictionary<int, MassSurfaceData>();
@@ -51,24 +54,18 @@ namespace EnergyAnalysisForDynamo.Utilities
                 if (!mySurfaceData.ContainsKey(id.IntegerValue))
                 {
                     MassSurfaceData d = (MassSurfaceData)MassEnergyAnalyticalModel.Document.GetElement(id);
+                    
+                    // add to dictionary to be able to keep track of ids
                     mySurfaceData.Add(id.IntegerValue, d);
+                    
+                    if (d.Category.Name == SurfaceTypeName)
+                    {
+                        // collect the id
+                        SelectedSurfaceIds.Add(id);
+                    }
                 }
             }
 
-            
-            
-            //filter by category = mass exterior wall
-            var allSurfsList = mySurfaceData.Values.ToList();
-            var selectedSurfList = from n in allSurfsList
-                                  where n.Category.Name == SurfaceTypeName
-                                  select n;
-
-            //output list
-            List<Autodesk.Revit.DB.ElementId> SelectedSurfaceIds = new List<Autodesk.Revit.DB.ElementId>();
-            foreach (var s in selectedSurfList)
-            {
-                SelectedSurfaceIds.Add(s.Id);
-            }
 
             List<ElementId> outSelectedSurfaceIds = SelectedSurfaceIds.Select(e => new ElementId(e.IntegerValue)).ToList();
 
@@ -79,10 +76,12 @@ namespace EnergyAnalysisForDynamo.Utilities
         public static List<EnergyAnalysisForDynamo.ElementId> GetSurfaceIdsFromZoneBasedOnType(MassZone MassZone, string SurfaceTypeName = "Mass Exterior Wall")
         {
             //some faces supposedly share massSurfaceData definitions (although i think they are all unique in practice) - here we're pulling out unique data definitions.  
-            Dictionary<int, MassSurfaceData> mySurfaceData = new Dictionary<int, MassSurfaceData>();
-
+            Dictionary<int, Autodesk.Revit.DB.Element> mySurfaceData = new Dictionary<int, Autodesk.Revit.DB.Element>();
+            List<Autodesk.Revit.DB.ElementId> SurfaceIds = new List<Autodesk.Revit.DB.ElementId>();
+            
             //get references to all of the faces
             IList<Reference> faceRefs = MassZone.GetReferencesToEnergyAnalysisFaces();
+            
             foreach (var faceRef in faceRefs)
             {
                 var srfType = faceRef.GetType();
@@ -93,30 +92,22 @@ namespace EnergyAnalysisForDynamo.Utilities
 
                 //add it to our dict if it isn't already there
                 if (!mySurfaceData.ContainsKey(id.IntegerValue))
-                {
-                    var mySurface = MassZone.Document.GetElement(id);
-                    // Extra check to make sure the surface is not a mass floor which is
-                    // a MassLevelData in REVIT. In Vasari it doesn't make any issues.
-                    if (mySurface.Category.Name != "Mass Floor")
-                    {
-                    MassSurfaceData d = (MassSurfaceData)MassZone.Document.GetElement(id);
-                    mySurfaceData.Add(id.IntegerValue, d);
-                    }
+                {   
+                    Autodesk.Revit.DB.Element mySurface = MassZone.Document.GetElement(id);
+                    //add id and surface to dictionary to keep track of data
+                    mySurfaceData.Add(id.IntegerValue, mySurface);
+                    
+                    if (mySurface.Category.Name == SurfaceTypeName)
+                        {                      
+                            // collect the id
+                            SurfaceIds.Add(id);
+                        }
 
                 }
             }
-
-            //filter by category = mass exterior wall
-            var allSurfsList = mySurfaceData.Values.ToList();
-            var extSurfList = from n in allSurfsList
-                              where n.Category.Name == SurfaceTypeName
-                              select n;
-
-            //list of element Ids to wrap and output
-            List<Autodesk.Revit.DB.ElementId> surfaceIds = extSurfList.Select(e => e.Id).ToList();
-
+            
             //loop over the output lists, and wrap them in our ElementId wrapper class
-            List<ElementId> outSurfaceIds = surfaceIds.Select(e => new ElementId(e.IntegerValue)).ToList();
+            List<ElementId> outSurfaceIds = SurfaceIds.Select(e => new ElementId(e.IntegerValue)).ToList();
 
             return outSurfaceIds;
         }
@@ -309,6 +300,7 @@ namespace EnergyAnalysisForDynamo.Utilities
 
             // Send the request to GBS
             var request = (HttpWebRequest)System.Net.WebRequest.Create(MassRunRequestUri);
+            request.Timeout = 300000;
             request.Method = "GET";
             // request.PreAuthenticate = true;
             request.ContentType = "application/xml";
@@ -326,6 +318,7 @@ namespace EnergyAnalysisForDynamo.Utilities
             
             // Send the request to GBS
             var changeRequest = (HttpWebRequest)System.Net.WebRequest.Create(MassRunUpdateUri);
+            changeRequest.Timeout = 300000;
             changeRequest.Method = "PUT";
             changeRequest.PreAuthenticate = true;
             changeRequest.ContentType = "application/xml";
@@ -367,12 +360,13 @@ namespace EnergyAnalysisForDynamo.Utilities
 
             // Send request to GBS
             System.Net.WebRequest request = System.Net.WebRequest.Create(signedRequestUri);
+            request.Timeout = 300000;
             WebResponse response = request.GetResponse();
 
             return response;
         }
 
-        public static WebResponse _CallPostApi(string requestUri, System.Type type, object o)
+        public static WebResponse _CallPostApi(string requestUri, System.Type type, object o, int Timeout = 300000)
         {
             string postString = null;
             try
@@ -396,6 +390,7 @@ namespace EnergyAnalysisForDynamo.Utilities
 
             // Send request to GBS
             var request = (HttpWebRequest)System.Net.WebRequest.Create(signedRequestUri);
+            request.Timeout = Timeout;
             request.Method = "POST";
             request.ContentType = "application/xml";
             using (Stream requestStream = request.GetRequestStream())
@@ -415,7 +410,7 @@ namespace EnergyAnalysisForDynamo.Utilities
 
         public static T DataContractJsonDeserialize<T>(string response)
         {
-            using (MemoryStream stream = new MemoryStream(System.Text.Encoding.Default.GetBytes(response)))
+            using (MemoryStream stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(response)))
             {
                 DataContractJsonSerializer serialize = new DataContractJsonSerializer(typeof(T));
                 return (T)serialize.ReadObject(stream);

@@ -30,7 +30,7 @@ namespace EnergyAnalysisForDynamo
         /// Gets existing Energy Data Settings from current document
         /// </summary>
         /// <returns></returns>
-        [MultiReturn("BldgType", "GlzPer", "ShadeDepth", "HVACSystem", "OSchedule")]
+        [MultiReturn("BldgType", "GlzPer", "SkylightPer", "ShadeDepth", "HVACSystem", "OSchedule", "CoreOffset", "DividePerimeter")]
         public static Dictionary<string, object> GetEnergySettings()
         {
             // Get current document
@@ -43,10 +43,14 @@ namespace EnergyAnalysisForDynamo
             return new Dictionary<string, object>
             {
                 { "BldgType", Enum.GetName(typeof(gbXMLBuildingType), es.BuildingType)}, 
-                { "GlzPer",  es.PercentageGlazing}, 
-                { "ShadeDepth",  es.ShadeDepth * UnitConverter.HostToDynamoFactor}, 
+                { "GlzPer",  es.PercentageGlazing},
+                {"SkylightPer", es.PercentageSkylights},
+                { "ShadeDepth",  es.ShadeDepth}, 
+ //               { "ShadeDepth",  es.ShadeDepth * UnitConverter.HostToDynamoFactor}, 
                 { "HVACSystem",Enum.GetName(typeof(gbXMLBuildingHVACSystem), es.BuildingHVACSystem)},
-                { "OSchedule",Enum.GetName(typeof(gbXMLBuildingOperatingSchedule), es.BuildingOperatingSchedule)}
+                { "OSchedule",Enum.GetName(typeof(gbXMLBuildingOperatingSchedule), es.BuildingOperatingSchedule)},
+                {"CoreOffset", es.MassZoneCoreOffset},
+                {"DividePerimeter", es.MassZoneDividePerimeter}
             };
 
 
@@ -66,9 +70,11 @@ namespace EnergyAnalysisForDynamo
         /// <param name="SkylightPer">Input skylight percentage (range: 0 to 1)</param>
         /// <param name="HVACSystem">Input Building HVAC system</param>
         /// <param name="OSchedule">Input Building Operating Schedule</param>
+        /// <param name="CoreOffset">Input Core Offset as a double. Default value is 15'0"(IP) and 5 meters(SI). Set the value to 0 not to create perimeter zones.</param>
+        /// <param name="DividePerimeter">Set to false not to divide perimeter zones. Default is true.</param>
         /// <returns></returns>
         [MultiReturn("EnergySettings", "report")]
-        public static Dictionary<string, object> SetEnergySettings(string BldgTyp = "", double GlzPer = 0, double ShadeDepth = 0, double SkylightPer = 0, string HVACSystem = "", string OSchedule = "")
+        public static Dictionary<string, object> SetEnergySettings(string BldgTyp = "", double GlzPer = 0, double ShadeDepth = 0, double SkylightPer = 0, string HVACSystem = "", string OSchedule = "", double CoreOffset = -1, bool DividePerimeter = true)
         {
 
             //Get active document
@@ -147,7 +153,8 @@ namespace EnergyAnalysisForDynamo
             if (ShadeDepth > 0.0)
             {
                 myEnergySettings.IsGlazingShaded = true;
-                myEnergySettings.ShadeDepth = ShadeDepth * UnitConverter.DynamoToHostFactor;
+                //myEnergySettings.ShadeDepth = ShadeDepth * UnitConverter.DynamoToHostFactor;
+                myEnergySettings.ShadeDepth = ShadeDepth;
             }
             else
             {
@@ -157,6 +164,17 @@ namespace EnergyAnalysisForDynamo
 
             // add skylight percentage
             myEnergySettings.PercentageSkylights = SkylightPer;
+
+            // set core-perimeter parameters
+            if (CoreOffset >= 0)
+            {
+                //myEnergySettings.MassZoneCoreOffset = CoreOffset * UnitConverter.DynamoToHostFactor;
+                myEnergySettings.MassZoneCoreOffset = CoreOffset;
+            }
+            
+            // set divide perimeter 
+            myEnergySettings.MassZoneDividePerimeter = DividePerimeter;
+
 
             //done with the transaction 
             TransactionManager.Instance.TransactionTaskDone();
